@@ -1,0 +1,28 @@
+
+# Python environment
+.venv/
+__pycache__/
+*.py[cod]
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Large datasets
+3MDAD/
+state-farm-distracted-driver-detection/
+ThermalImagesDataset/
+
+# Downloaded archives
+*.zip
+*.7z
+*.rar
+
+# Model weights and outputs
+*.pt
+*.pth
+*.onnx
+checkpoints/
+runs/
+outputs/
