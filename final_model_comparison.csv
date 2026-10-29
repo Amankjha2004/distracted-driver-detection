@@ -1,0 +1,9 @@
+experiment,model,accuracy_percent,macro_f1,weighted_f1,evaluation_set,notes
+Image-based V2 common validation,YOLOv12 + CNN,55.3711,0.538891,,"1,024 V2 validation images",Best of the four image-based models on the common validation set.
+Image-based V2 common validation,DenseNet121 + SVM,37.793,0.385155,,"1,024 V2 validation images",Same common validation set as other image-based models.
+Image-based V2 common validation,MobileNetV3 + Attention,33.9844,0.330747,,"1,024 V2 validation images",Same common validation set as other image-based models.
+Image-based V2 common validation,EfficientNetB3 + ViT,34.7656,0.32361,,"1,024 V2 validation images",Caveat: evaluation recreated pretrained backbones with torchvision default weights; exact training weights were not fully verified.
+Separate sequence experiment,ResNet50 + BiLSTM,41.41,0.4129,,128 sequences of 8 frames,"Separate evaluation protocol; do not compare directly with the 1,024-image results."
+Thermal sequence test split,CNN + BiLSTM,82.3635,0.664423,0.849469,"3,901 thermal sequences; group-based split","Leading thermal model in current experiment; uses three numerical features per frame, not raw thermal images."
+Thermal sequence test split,CNN + Transformer,81.0561,0.656183,0.840622,"3,901 thermal sequences; group-based split","Uses three numerical features per frame, not raw thermal images."
+Thermal sequence test split,CNN + GRU,70.546,0.599863,0.764424,"3,901 thermal sequences; group-based split","Uses three numerical features per frame, not raw thermal images."

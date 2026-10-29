@@ -1,8 +1,7 @@
 
 from pathlib import Path
-import pandas as pd
 import random
-import math
+import pandas as pd
 
 ROOT = Path(r"D:\AI_FINAL_PROJECT")
 INPUT_CSV = ROOT / "3mdad_master_metadata.csv"
@@ -10,119 +9,136 @@ OUTPUT_CSV = ROOT / "3mdad_master_metadata_split.csv"
 
 SEED = 42
 
-TRAIN_RATIO = 0.70
-VAL_RATIO = 0.15
-TEST_RATIO = 0.15
+SPLIT_NAMES = ["train", "validation", "test"]
+
+def split_subjects(subjects, seed):
+    """Split subjects reproducibly: 70% train, 15% validation, rest test."""
+    subjects = sorted(set(subjects))
+    rng = random.Random(seed)
+    rng.shuffle(subjects)
+
+    n = len(subjects)
+    train_end = round(n * 0.70)
+    val_end = train_end + round(n * 0.15)
+
+    return {
+        "train": set(subjects[:train_end]),
+        "validation": set(subjects[train_end:val_end]),
+        "test": set(subjects[val_end:]),
+    }
 
 if not INPUT_CSV.exists():
-    raise SystemExit(
-        f"Master metadata not found: {INPUT_CSV}\n"
-        "Run prepare_3mdad_metadata.py first."
-    )
-
-if not math.isclose(
-    TRAIN_RATIO + VAL_RATIO + TEST_RATIO, 1.0
-):
-    raise SystemExit("Split ratios must sum to 1.0.")
+    raise SystemExit(f"Metadata CSV not found: {INPUT_CSV}")
 
 df = pd.read_csv(INPUT_CSV)
 
-required = {"image_path", "subject", "activity_id", "stream"}
+required = {"image_path", "stream", "time", "subject", "activity_id"}
 missing = required - set(df.columns)
 
 if missing:
-    raise SystemExit(f"Missing required columns: {sorted(missing)}")
+    raise SystemExit(f"Missing columns: {sorted(missing)}")
 
-if df["subject"].isna().any():
-    raise SystemExit("Subject IDs contain missing values.")
+if df[list(required)].isna().any().any():
+    raise SystemExit("Required metadata contains missing values.")
 
-# Keep every subject entirely within one split.
-subjects = sorted(df["subject"].astype(str).unique().tolist())
+# Day and night were collected as separate participant cohorts.
+# Keep each subject together across every modality/view within its cohort.
+df["subject"] = df["subject"].astype(str)
+df["time"] = df["time"].astype(str).str.lower()
 
-rng = random.Random(SEED)
-rng.shuffle(subjects)
+if not set(df["time"].unique()).issubset({"day", "night"}):
+    raise SystemExit("Unexpected time/cohort value in metadata.")
 
-total_subjects = len(subjects)
-train_end = round(total_subjects * TRAIN_RATIO)
-val_end = train_end + round(total_subjects * VAL_RATIO)
+assignments = {}
 
-# Make sure all subjects are assigned exactly once.
-train_subjects = set(subjects[:train_end])
-val_subjects = set(subjects[train_end:val_end])
-test_subjects = set(subjects[val_end:])
+for cohort_index, cohort in enumerate(["day", "night"]):
+    cohort_df = df[df["time"] == cohort]
+    subjects = sorted(cohort_df["subject"].unique())
 
-if train_subjects & val_subjects:
-    raise SystemExit("Subject leakage between train and validation.")
+    if not subjects:
+        print(f"WARNING: No subjects found for {cohort}.")
+        continue
 
-if train_subjects & test_subjects:
-    raise SystemExit("Subject leakage between train and test.")
+    groups = split_subjects(subjects, SEED + cohort_index)
 
-if val_subjects & test_subjects:
-    raise SystemExit("Subject leakage between validation and test.")
+    print(f"\n{cohort.upper()} cohort: {len(subjects)} subjects")
 
-def assign_split(subject):
-    subject = str(subject)
+    for split_name, split_subjects_set in groups.items():
+        print(f"  {split_name}: {len(split_subjects_set)} subjects")
 
-    if subject in train_subjects:
-        return "train"
-    if subject in val_subjects:
-        return "validation"
-    return "test"
+        for subject in split_subjects_set:
+            assignments[(cohort, subject)] = split_name
 
-df["split"] = df["subject"].map(assign_split)
+df["split"] = [
+    assignments[(time, subject)]
+    for time, subject in zip(df["time"], df["subject"])
+]
+
+# Verify each cohort/subject has only one split.
+subject_split_counts = (
+    df.groupby(["time", "subject"])["split"].nunique()
+)
+
+if (subject_split_counts > 1).any():
+    raise SystemExit("ERROR: A subject occurs in multiple splits.")
+
+# Verify no image path is duplicated.
+if df["image_path"].duplicated().any():
+    raise SystemExit("ERROR: Duplicate image paths found.")
 
 df.to_csv(OUTPUT_CSV, index=False)
 
-print("=" * 60)
-print("3MDAD SUBJECT-WISE SPLIT REPORT")
-print("=" * 60)
+print("\n" + "=" * 65)
+print("UPDATED 3MDAD COHORT-AWARE SPLIT REPORT")
+print("=" * 65)
+print("Total records:", f"{len(df):,}")
+print("Output:", OUTPUT_CSV)
 
-print("Total image records:", f"{len(df):,}")
-print("Unique subjects:", total_subjects)
-print("Random seed:", SEED)
+print("\nImage records per cohort and split:")
+print(
+    pd.crosstab(df["time"], df["split"])
+      .reindex(columns=SPLIT_NAMES, fill_value=0)
+      .to_string()
+)
 
-print("\nSubjects assigned:")
-print("Train:", len(train_subjects))
-print("Validation:", len(val_subjects))
-print("Test:", len(test_subjects))
+print("\nSubjects per stream and split:")
+print(
+    df.groupby(["stream", "split"])["subject"]
+      .nunique()
+      .unstack(fill_value=0)
+      .reindex(columns=SPLIT_NAMES, fill_value=0)
+      .to_string()
+)
 
-print("\nImage records per split:")
-print(df["split"].value_counts().to_string())
-
-print("\nActivity classes per split:")
-for split_name in ["train", "validation", "test"]:
-    subset = df[df["split"] == split_name]
-    print(f"\n{split_name.upper()}")
+print("\nActivity coverage:")
+for (cohort, split_name), part in df.groupby(["time", "split"]):
+    classes = set(part["activity_id"].astype(int))
     print(
-        subset.groupby("activity_id")
-        .size()
-        .sort_index()
-        .to_string()
+        f"{cohort:5} {split_name:10}: "
+        f"{len(classes)}/16 classes"
     )
 
-print("\nStreams per split:")
-print(
-    pd.crosstab(df["split"], df["stream"]).to_string()
-)
+print("\nSubject overlap checks within each cohort:")
+for cohort in ["day", "night"]:
+    sets = {
+        split_name: set(
+            df.loc[
+                (df["time"] == cohort) & (df["split"] == split_name),
+                "subject"
+            ]
+        )
+        for split_name in SPLIT_NAMES
+    }
 
-print("\nChecking subject leakage...")
-subject_sets = {
-    name: set(df.loc[df["split"] == name, "subject"].astype(str))
-    for name in ["train", "validation", "test"]
-}
+    for first, second in [
+        ("train", "validation"),
+        ("train", "test"),
+        ("validation", "test"),
+    ]:
+        overlap = sets[first] & sets[second]
+        print(
+            f"{cohort}: {first} vs {second}: "
+            f"{len(overlap)} overlapping subjects"
+        )
 
-print(
-    "Train/validation overlap:",
-    len(subject_sets["train"] & subject_sets["validation"])
-)
-print(
-    "Train/test overlap:",
-    len(subject_sets["train"] & subject_sets["test"])
-)
-print(
-    "Validation/test overlap:",
-    len(subject_sets["validation"] & subject_sets["test"])
-)
-
-print("\nOutput:", OUTPUT_CSV)
-print("Split generation complete.")
+print("\nSplit generation complete.")
