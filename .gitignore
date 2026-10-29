@@ -26,3 +26,9 @@ ThermalImagesDataset/
 checkpoints/
 runs/
 outputs/
+
+# Generated 3MDAD metadata files
+3mdad_day_rgb1_metadata.csv
+3mdad_day_rgb1_subject_split_80_20.csv
+3mdad_master_metadata.csv
+3mdad_master_metadata_split.csv
